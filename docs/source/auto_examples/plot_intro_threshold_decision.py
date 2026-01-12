@@ -1,18 +1,40 @@
-"""=============================
-Threshold-based decision sketch.
-================================
+"""===============================
+Threshold-based decision sketch
+===============================
 
-A minimal thresholding “predictor” that turns continuous inputs into class labels,
+A minimal thresholding "predictor" that turns continuous inputs into class labels,
 plus a plot showing how the decision changes with the threshold.
 """
 
 from __future__ import annotations
 
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Configure a module logger for example output (suitable for examples)
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 
 def threshold_predict(x: np.ndarray, threshold: float) -> np.ndarray:
+    """Return binary labels by thresholding the input values.
+
+    Elements of `x` greater than `threshold` are labeled as `1`, otherwise `0`.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of scores or values to be thresholded.
+    threshold : float
+        Threshold value; elements > `threshold` are assigned label 1.
+
+    Returns:
+    -------
+    np.ndarray
+        Integer array (0 or 1) with the same shape as `x`.
+    """
     return (x > threshold).astype(int)
 
 
@@ -20,8 +42,8 @@ x = np.linspace(-1.0, 2.0, 9)
 threshold = 0.3
 preds = threshold_predict(x, threshold)
 
-print("x:", x)
-print("preds:", preds)
+logger.info("x: %s", x)
+logger.info("preds: %s", preds)
 
 plt.figure(figsize=(4, 2.5))
 plt.plot(x, np.zeros_like(x), "o", label="input")

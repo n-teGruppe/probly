@@ -1,6 +1,4 @@
-"""====================================
-Working with samples (`ArraySample`)
-====================================
+"""Working with samples (`ArraySample`).
 
 ``probly`` represents repeated stochastic predictions as a "sample". For NumPy-like data,
 the concrete implementation is :class:`probly.representation.sampling.sample.ArraySample`.
@@ -14,10 +12,15 @@ This example shows:
 
 from __future__ import annotations
 
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 from probly.representation.sampling.sample import ArraySample
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Imagine these are 3 stochastic forward passes for 2 instances and 4 classes.
 # Shape per pass: (instances, classes)
@@ -30,10 +33,10 @@ sample = ArraySample([pass_1, pass_2, pass_3])
 mean = sample.mean()
 std = sample.std(ddof=0)
 
-print("mean shape:", mean.shape)
-print("std shape:", std.shape)
-print("mean[0]:", mean[0])
-print("std[0]:", std[0])
+logger.info("mean shape: %s", mean.shape)
+logger.info("std shape: %s", std.shape)
+logger.info("mean[0]: %s", mean[0])
+logger.info("std[0]: %s", std[0])
 
 # Plot mean ± std for instance 0
 classes = np.arange(mean.shape[1])

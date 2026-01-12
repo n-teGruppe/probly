@@ -8,11 +8,30 @@ plus a plot showing how the decision changes with the threshold.
 
 from __future__ import annotations
 
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 
 def threshold_predict(x: np.ndarray, threshold: float) -> np.ndarray:
+    """Return binary labels by thresholding the input array.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of scores or values to threshold.
+    threshold : float
+        Threshold value; values > threshold are labeled 1, otherwise 0.
+
+    Returns:
+    -------
+    np.ndarray
+        Integer array of shape like `x` with values 0 or 1.
+    """
     return (x > threshold).astype(int)
 
 
@@ -20,8 +39,8 @@ x = np.linspace(-1.0, 2.0, 9)
 threshold = 0.3
 preds = threshold_predict(x, threshold)
 
-print("x:", x)
-print("preds:", preds)
+logger.info("x: %s", x)
+logger.info("preds: %s", preds)
 
 plt.figure(figsize=(4, 2.5))
 plt.plot(x, np.zeros_like(x), "o", label="input")

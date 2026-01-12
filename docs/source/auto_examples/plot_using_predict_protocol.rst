@@ -91,7 +91,7 @@ showing the input values and the predicted class labels.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** (0 minutes 0.018 seconds)
+   **Total running time of the script:** (0 minutes 0.017 seconds)
 
 
 .. _sphx_glr_download_auto_examples_plot_using_predict_protocol.py:

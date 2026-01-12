@@ -1,6 +1,4 @@
-"""==========================
-Hello, uncertainty (glimpse).
-=============================
+"""Hello, uncertainty (glimpse).
 
 This tiny example shows how repeated stochastic predictions can be summarized into
 mean probabilities and visualized as error bars.
@@ -8,8 +6,13 @@ mean probabilities and visualized as error bars.
 
 from __future__ import annotations
 
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Three stochastic passes for one instance and four classes
 passes = np.array(
@@ -23,8 +26,8 @@ passes = np.array(
 mean = passes.mean(axis=0)
 std = passes.std(axis=0, ddof=0)
 
-print("Mean probs:", mean)
-print("Std  probs:", std)
+logger.info("Mean probs: %s", mean)
+logger.info("Std  probs: %s", std)
 
 classes = np.arange(mean.shape[0])
 plt.figure(figsize=(4, 2.5))
