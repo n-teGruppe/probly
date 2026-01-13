@@ -10,6 +10,7 @@ while still supporting the simple ``predictor(x)`` callable pattern.
 
 To make the execution visible in the gallery, this example also produces a small plot
 showing the input values and the predicted class labels.
+
 """
 
 from __future__ import annotations
