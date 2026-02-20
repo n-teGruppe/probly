@@ -1,4 +1,4 @@
-# Implemented methods
+# Implemented Methods
 The following methods are currently implemented in `probly`.
 
 ## Representation
