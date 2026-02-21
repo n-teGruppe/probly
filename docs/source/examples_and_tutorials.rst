@@ -187,13 +187,13 @@ Summary (I)
 In this example, ``probly`` was used to transform a standard neural network into an uncertainty-aware model. Dropout remains active during inference and multiple forward passes allow you to obtain predictive uncertainty without modifying the original architecture. This approach builds on the MC Dropout framework for approximate Bayesian inference in deep networks :cite:`gal2016dropout` and follows standard best practices in deep learning :cite:`goodfellow2016deep,bishop2006pattern`.
 
 
-2. Creating a SubEnsemble with ``probly``
-------------------------------------------
+2. Creating and Subsetting an Ensemble with ``probly``
+------------------------------------------------------
 
 What you will learn (II)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In this tutorial, you will learn how to construct an ensemble using ``probly`` and how to derive a smaller ``SubEnsemble`` without retraining. This allows you to trade inference speed for accuracy and predictive uncertainty quality in a controlled way. The design follows the deep ensemble methodology of Lakshminarayanan et al. :cite:`lakshminarayanan2017simple` and classical ensemble learning ideas :cite:`dietterich2000ensemble`.
+In this tutorial, you will learn how to construct an ensemble using ``probly`` and how to evaluate a smaller subset of members without retraining. This allows you to trade inference speed for accuracy and predictive uncertainty quality in a controlled way. The design follows the deep ensemble methodology of Lakshminarayanan et al. :cite:`lakshminarayanan2017simple` and classical ensemble learning ideas :cite:`dietterich2000ensemble`.
 
 
 Step 1: Define a simple base model
@@ -237,15 +237,14 @@ The shared base model architecture ensures that differences between ensemble mem
 Step 2: Create an Ensemble with ``probly``
 """""""""""""""""""""""""""""""""""""""""""""
 
-You now instantiate multiple independent copies of the base model and wrap them into a ``probly`` ``Ensemble``. Each member will be trained separately but evaluated jointly.
+You now use ``probly``'s ensemble transformation to create multiple independent model members. Each member will be trained separately but evaluated jointly.
 
 .. code-block:: python
 
-   from probly.ensemble import Ensemble
+   from probly.transformation import ensemble as make_ensemble
 
    num_members = 5
-   members = [SmallMLP().to(device) for _ in range(num_members)]
-   ensemble = Ensemble(members)
+   ensemble_members = make_ensemble(SmallMLP().to(device), num_members=num_members)
 
 This construction corresponds to the **deep ensemble** paradigm :cite:`lakshminarayanan2017simple`, where several independently trained networks are combined to obtain improved accuracy and better-calibrated uncertainty estimates compared to a single model.
 
@@ -272,7 +271,7 @@ Each ensemble member is trained independently on the same data. Due to random in
                loss.backward()
                optimizer.step()
 
-   for m in members:
+   for m in ensemble_members:
        train_member(m, train_loader, epochs=1)
 
 While only one epoch is used here for brevity, additional epochs typically increase accuracy. The crucial property is that each member learns a slightly different function, giving rise to ensemble diversity :cite:`dietterich2000ensemble,fort2019deep`.
@@ -286,59 +285,59 @@ The ensemble prediction is obtained by aggregating individual member predictions
 .. code-block:: python
 
    @torch.no_grad()
-   def evaluate(model, loader):
-       model.eval()
+   def evaluate_members(members, loader):
+       for m in members:
+           m.eval()
        correct = 0
        total = 0
        for x, y in loader:
            x, y = x.to(device), y.to(device)
-           preds = model(x).argmax(dim=1)
+           logits = torch.stack([m(x) for m in members], dim=0).mean(dim=0)
+           preds = logits.argmax(dim=1)
            correct += (preds == y).sum().item()
            total += x.size(0)
        return correct / total
 
-   full_acc = evaluate(ensemble, test_loader)
+   full_acc = evaluate_members(ensemble_members, test_loader)
    print("Ensemble accuracy:", full_acc)
 
-In ``probly``, the ``Ensemble`` abstraction takes care of combining member outputs internally, making it straightforward to compare an ensemble to a single model in terms of accuracy and uncertainty.
+In ``probly``, the ensemble transformation gives you member models that you can aggregate explicitly (for example by averaging logits), making it straightforward to compare ensemble and single-model behavior.
 
 
-Step 5: Create and evaluate a SubEnsemble
+Step 5: Evaluate a smaller member subset
 """""""""""""""""""""""""""""""""""""""""""
 
-Using the trained ensemble, you can construct a ``SubEnsemble`` that uses only a subset of the ensemble members. This allows for a flexible accuracy–latency trade-off at deployment time without needing to retrain any models.
+Using the trained ensemble members, you can evaluate only a subset of them. This allows for a flexible accuracy–latency trade-off at deployment time without needing to retrain any models.
 
 .. code-block:: python
 
-   from probly.ensemble import SubEnsemble
+   subset_members = list(ensemble_members)[:2]
+   sub_acc = evaluate_members(subset_members, test_loader)
+   print("Subset accuracy:", sub_acc)
 
-   sub = SubEnsemble(ensemble, indices=[0, 1])
-   sub_acc = evaluate(sub, test_loader)
-   print("SubEnsemble accuracy:", sub_acc)
+The idea of using partial ensembles or subnetworks to control computational budget is related to recent work on training independent subnetworks for robust predictions :cite:`havasi2021training` and subsampling strategies for efficient uncertainty estimation :cite:`cunningham2020ensemble`. With ``probly``, this pattern can be implemented by selecting a subset of ensemble members.
 
-The idea of using partial ensembles or subnetworks to control computational budget is related to recent work on training independent subnetworks for robust predictions :cite:`havasi2021training` and subsampling strategies for efficient uncertainty estimation :cite:`cunningham2020ensemble`. With ``probly``, this pattern becomes a simple configuration choice.
-
-Visual result SubEnsemble
-"""""""""""""""""""""""""""
+Visual result (subset vs full)
+""""""""""""""""""""""""""""""
 
 .. image:: /_static/subensemble_comparison.png
    :width: 500px
    :align: center
-   :alt: Accuracy comparison between full ensemble and SubEnsemble
+   :alt: Accuracy comparison between full ensemble and subset
 
 Summary (II)
 ^^^^^^^^^^^^^^^^^^^^
 
-In this example, ``probly`` was used to create both a full Ensemble and a SubEnsemble without retraining. The full Ensemble generally provides the highest accuracy and most reliable uncertainty, while the SubEnsemble offers reduced inference cost with still useful performance. This illustrates how deep ensembles :cite:`lakshminarayanan2017simple` can be adapted to practical deployment constraints using ``probly``’s ensemble abstractions.
+In this example, ``probly`` was used to create an ensemble and then evaluate both the full member set and a smaller subset without retraining. The full ensemble generally provides the highest accuracy and most reliable uncertainty, while the subset offers reduced inference cost with still useful performance.
 
 
-3. MixedEnsemble with ``probly``
----------------------------------
+3. Heterogeneous Ensemble Pattern with ``probly``
+-------------------------------------------------
 
 What you will learn (III)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In this tutorial, you will learn how to build a ``MixedEnsemble`` using ``probly`` by combining different neural network architectures into a single probabilistic ensemble. You will compare it to a homogeneous ensemble and observe how model diversity may influence performance and robustness. This follows the general idea that heterogeneous ensembles can outperform homogeneous ones when models capture complementary inductive biases :cite:`opitz1999popular,jacobs1991adaptive`.
+In this tutorial, you will learn how to build a heterogeneous ensemble pattern using ``probly`` by combining different neural network architectures in one evaluation pipeline. You will compare it to a homogeneous ensemble and observe how model diversity may influence performance and robustness. This follows the general idea that heterogeneous ensembles can outperform homogeneous ones when models capture complementary inductive biases :cite:`opitz1999popular,jacobs1991adaptive`.
 
 
 Step 1: Prepare data
@@ -366,7 +365,7 @@ As in the previous tutorials, you use MNIST as a benchmark dataset :cite:`lecun1
 Step 2: Define different architectures
 """""""""""""""""""""""""""""""""""""""""
 
-You now define two different architectures: a small CNN and a small MLP. The CNN leverages spatial structure in the images, while the MLP operates on flattened pixels. Combining these architectures in a MixedEnsemble reflects the idea of mixing experts with different inductive biases :cite:`jacobs1991adaptive`.
+You now define two different architectures: a small CNN and a small MLP. The CNN leverages spatial structure in the images, while the MLP operates on flattened pixels. Combining these architectures in one ensemble-style evaluation reflects the idea of mixing experts with different inductive biases :cite:`jacobs1991adaptive`.
 
 .. code-block:: python
 
@@ -412,32 +411,30 @@ You now define two different architectures: a small CNN and a small MLP. The CNN
 The architectural diversity is the main driver of improved robustness in heterogeneous ensembles :cite:`opitz1999popular`, since different architectures often fail on different inputs.
 
 
-Step 3: Create Ensemble and MixedEnsemble
-"""""""""""""""""""""""""""""""""""""""""""
+Step 3: Create homogeneous and heterogeneous member sets
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-You first construct a homogeneous ensemble consisting only of CNNs, and then a ``MixedEnsemble`` containing both CNN and MLP members.
+You first construct a homogeneous ensemble consisting only of CNNs, and then a heterogeneous member set containing both CNN and MLP members.
 
 .. code-block:: python
 
-   from probly.ensemble import Ensemble, MixedEnsemble
+   from probly.transformation import ensemble as make_ensemble
 
-   cnn_members = [SmallCNN().to(device) for _ in range(3)]
-   cnn_ensemble = Ensemble(cnn_members)
+   cnn_ensemble_members = make_ensemble(SmallCNN().to(device), num_members=3)
 
    mixed_members = [
        SmallCNN().to(device),
        SmallCNN().to(device),
        SmallMLP().to(device),
    ]
-   mixed_ensemble = MixedEnsemble(mixed_members)
 
-This setup mirrors the idea of mixtures of experts :cite:`jacobs1991adaptive` and modern large-scale sparse ensembles :cite:`shazeer2017outrageously`, but in a simplified form where ``probly`` handles the aggregation of member predictions without a separate gating network.
+This setup mirrors the idea of mixtures of experts :cite:`jacobs1991adaptive` and modern large-scale sparse ensembles :cite:`shazeer2017outrageously`, but in a simplified form where member predictions are aggregated without a separate gating network.
 
 
 Step 4: Train all members
 """""""""""""""""""""""""""
 
-All ensemble members, both in the homogeneous CNN ensemble as well as the mixed ensemble are trained independently using the same training loop.
+All members, both in the homogeneous CNN ensemble and in the heterogeneous set, are trained independently using the same training loop.
 
 .. code-block:: python
 
@@ -455,7 +452,7 @@ All ensemble members, both in the homogeneous CNN ensemble as well as the mixed 
                loss.backward()
                optimizer.step()
 
-   for m in cnn_members:
+   for m in cnn_ensemble_members:
        train(m, train_loader, epochs=1)
 
    for m in mixed_members:
@@ -464,33 +461,34 @@ All ensemble members, both in the homogeneous CNN ensemble as well as the mixed 
 Independent training encourages diversity in the learned decision boundaries, which is critical for ensemble performance under distribution shift :cite:`opitz1999popular,ovadia2019trust`.
 
 
-Step 5: Evaluate both ensembles
+Step 5: Evaluate both member sets
 """""""""""""""""""""""""""""""""""
 
-Finally, you evaluate both the homogeneous CNN ensemble and the MixedEnsemble on the test set and compare their accuracies.
+Finally, you evaluate both the homogeneous CNN ensemble and the heterogeneous member set on the test set and compare their accuracies.
 
 .. code-block:: python
 
    @torch.no_grad()
-   def evaluate(model, loader):
-       model.eval()
+   def evaluate_members(members, loader):
+       for m in members:
+           m.eval()
        correct = 0
        total = 0
        for x, y in loader:
            x, y = x.to(device), y.to(device)
-           logits = model(x)
+           logits = torch.stack([m(x) for m in members], dim=0).mean(dim=0)
            preds = logits.argmax(dim=1)
            correct += (preds == y).sum().item()
            total += x.size(0)
        return correct / total
 
-   acc_cnn = evaluate(cnn_ensemble, test_loader)
-   acc_mixed = evaluate(mixed_ensemble, test_loader)
+   acc_cnn = evaluate_members(cnn_ensemble_members, test_loader)
+   acc_mixed = evaluate_members(mixed_members, test_loader)
 
    print("Homogeneous CNN Ensemble accuracy:", acc_cnn)
-   print("MixedEnsemble accuracy:", acc_mixed)
+   print("Heterogeneous member-set accuracy:", acc_mixed)
 
-Beyond accuracy, you could also compare calibration and robustness under distribution shift, as suggested by Ovadia et al. :cite:`ovadia2019trust`. Mixed ensembles often exhibit different failure modes than homogeneous ones, which can be beneficial in safety-critical applications.
+Beyond accuracy, you could also compare calibration and robustness under distribution shift, as suggested by Ovadia et al. :cite:`ovadia2019trust`. Heterogeneous member sets often exhibit different failure modes than homogeneous ones, which can be beneficial in safety-critical applications.
 
 
 Visual result
@@ -504,7 +502,7 @@ Visual result
 Summary (III)
 ^^^^^^^^^^^^^^^^^^^^
 
-In this example, you used ``probly`` to construct both a homogeneous ensemble and a ``MixedEnsemble`` combining different model types. The MixedEnsemble may capture complementary model behaviour and can therefore improve robustness and calibration in some settings :cite:`opitz1999popular,ovadia2019trust`. By providing a unified abstraction for homogeneous and heterogeneous ensembles, ``probly`` makes it straightforward to explore such design choices in practical applications.
+In this example, you used ``probly`` to construct a homogeneous ensemble and compared it with a heterogeneous member set combining different model types. The heterogeneous setup may capture complementary model behaviour and can therefore improve robustness and calibration in some settings :cite:`opitz1999popular,ovadia2019trust`.
 
 4. Hierarchical model (grouped data) with ``probly``
 -----------------------------------------------------
@@ -564,8 +562,8 @@ Run your chosen probly inference method (optimisation or sampling) and use batch
 .. code-block:: python
 
    # model = ...
-   # result = probly.fit(model, data=...)
-   # or: posterior = probly.sample(model, data=...)
+   # run your framework-specific training/inference loop here
+   # then compute uncertainty statistics from model outputs
    pass
 
 
@@ -631,8 +629,8 @@ Fit weights and component parameters and compute responsibilities if needed.
 
 .. code-block:: python
 
-   # posterior = probly.sample(...)
-   # responsibilities = p(z=k | x_i, posterior)
+   # run your chosen optimisation/sampling procedure here
+   # responsibilities = p(z=k | x_i, learned_parameters)
    pass
 
 

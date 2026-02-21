@@ -331,27 +331,25 @@ The result is a new model object, ready to produce uncertainty-aware predictions
 3.3 Generate an Uncertainty Representation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You now call this new, transformed model.
-``probly`` runs inference multiple times behind the scenes (stochastic forward passes) and returns a
-Representation object. This object acts as a container for the raw results. The most important data it
-holds is the collection of probability outputs from each forward pass.
+You now use a sampler on the transformed model to generate multiple stochastic forward passes.
+Those sampled predictions can then be stacked into an array for quantification.
 
 .. code-block:: python
 
-   representation = mc_dropout_model(input_data)
+   import numpy as np
+   from probly.representation.sampling import sampler_factory
 
-   # The representation object contains the raw probability samples
-   # (e.g., in a .probs attribute)
-   probs_array = representation.probs
+   sampler = sampler_factory(mc_dropout_model, num_samples=20)
+   probs_array = np.stack([p.detach().cpu().numpy() for p in sampler(input_data)], axis=1)
 
-This array has shape (num_samples, batch_size, num_classes) and contains all the stochastic outputs needed for quantification.
+This array has shape (batch_size, num_samples, num_classes) and contains all the stochastic outputs needed for quantification.
 
 
 
 3.4 Quantify the Uncertainty
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Finally, you pass the raw probability array from the representation object to one of ``probly`` 's
+Finally, you pass the raw probability array from the sampled outputs to one of ``probly`` 's
 many Quantification functions. This distills the complex set of samples into a single, meaningful score.
 ``probly`` provides functions to measure different types of uncertainty:
 
@@ -405,11 +403,12 @@ By applying probly, we transform the model to produce uncertainty-aware predicti
    # Apply an uncertainty transformation (e.g., MC Dropout)
    mc_dropout_model = probly.transformation.dropout(trained_model, p=0.5)
 
-   # Generate an uncertainty representation
-   representation = mc_dropout_model(input_data)
+   import numpy as np
+   from probly.representation.sampling import sampler_factory
 
-   # Extract raw probability samples
-   probs_array = representation.probs  # Shape: (num_samples, batch_size, num_classes)
+   # Generate stochastic prediction samples and stack them
+   sampler = sampler_factory(mc_dropout_model, num_samples=20)
+   probs_array = np.stack([p.detach().cpu().numpy() for p in sampler(input_data)], axis=1)
 
    # Quantify uncertainty (e.g., predictive entropy)
    pe_scores = probly.quantification.classification.predictive_entropy(probs_array)

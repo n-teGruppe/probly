@@ -7,7 +7,7 @@ probly is a Python package for **uncertainty representation** and **quantificati
 Installation
 --------------
 
-`probly` is intended to work with **Python 3.10 and above**. Installation can be done via `pip` and
+`probly` is intended to work with **Python 3.12.3 and above**. Installation can be done via `pip` and
 or `uv`:
 
 .. code-block:: sh
@@ -37,32 +37,35 @@ Below is a minimal end-to-end example showing:
 
 .. code-block:: python
 
+   import numpy as np
    import probly
-   import torch.nn.functional as F
+   from probly.evaluation.tasks import out_of_distribution_detection
+   from probly.representation.sampling import sampler_factory
 
    # 1. Create your neural network as usual
    net = ...  # define or load your PyTorch model
 
-   # 2. Wrap the model with an uncertainty representation (Dropout example)
-   model = probly.representation.Dropout(net)
+   # 2. Transform the model to enable MC Dropout-style sampling
+   model = probly.transformation.dropout(net, p=0.5)
 
    # 3. Train the model normally using your existing training loop
    train(model)
 
-   # 4. Predict uncertainty representations for in-distribution data
+   # 4. Sample predictions for in-distribution data
    data = ...  # load or create input batch
-   preds = model.predict_representation(data)
+   sampler = sampler_factory(model, num_samples=20)
+   preds = np.stack([p.detach().cpu().numpy() for p in sampler(data)], axis=1)
 
    # Convert representation to an epistemic uncertainty value
    eu = probly.quantification.classification.mutual_information(preds)
 
    # 5. Detect out-of-distribution samples
    data_ood = ...  # load or create OOD samples
-   preds_ood = model.predict_representation(data_ood)
+   preds_ood = np.stack([p.detach().cpu().numpy() for p in sampler(data_ood)], axis=1)
    eu_ood = probly.quantification.classification.mutual_information(preds_ood)
 
    # Evaluate OOD detection using AUROC
-   auroc = probly.tasks.out_of_distribution_detection(eu, eu_ood)
+   auroc = out_of_distribution_detection(eu, eu_ood)
    print("AUROC:", auroc)
 
 The `quickstart` example uses Dropout as the uncertainty representation,

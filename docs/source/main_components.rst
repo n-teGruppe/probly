@@ -73,8 +73,8 @@ This approach provides a principled framework for capturing both **aleatoric unc
 (inherent data noise) and **epistemic uncertainty** (model uncertainty due to limited data)
 simultaneously :cite:`sensoyEvidentialDeep2018`.
 
-``probly`` supports seven evidential deep learning methods through a unified training interface,
-covering both classification and regression tasks.
+``probly`` provides evidential methods for both classification and regression through the
+available training and loss components.
 
 :doc:`Evidential Methods Documentation <evidential_methods>`
 
