@@ -20,23 +20,23 @@ class switchdispatch[C: Callable]:  # noqa: N801
     rather than type.
 
     Example:
-    ```python
-        @switchdispatch
-        def func(x):
-            return "default"
+        .. code-block:: python
 
-        @func.register(1)
-        def _(x):
-            return "one"
+            @switchdispatch
+            def func(x):
+                return "default"
 
-        @func.register(2)
-        def _(x):
-            return "two"
+            @func.register(1)
+            def _(x):
+                return "one"
 
-        print(func(1))  # Output: "one"
-        print(func(2))  # Output: "two"
-        print(func(3))  # Output: "default"
-    ```
+            @func.register(2)
+            def _(x):
+                return "two"
+
+            print(func(1))  # Output: "one"
+            print(func(2))  # Output: "two"
+            print(func(3))  # Output: "default"
     """
 
     def __init__(self, func: C) -> None:

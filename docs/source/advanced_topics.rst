@@ -60,27 +60,18 @@ on this page.
 2.1 Recall: What is a transformation?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In ``probly``, a **transformation** is a small building block that maps values between two spaces,
-similar in spirit to the bijectors used in TensorFlow Probability :cite:`tfpBijectorSoftplus2023,rezendeVariationalFlows2015`:
+In ``probly``, a **transformation** is a reusable model rewrite or wrapper that turns a base
+predictor into a predictor with uncertainty-aware behavior.
 
-- An **unconstrained space**, where optimisation and inference algorithms can work freely, and
-- A **constrained space**, which matches the natural domain of your parameters or predictions
-  (for example positive scales, probabilities on a simplex, or bounded intervals) :cite:`tfpBijectorSoftplus2023`.
+In the current codebase, this is implemented primarily as:
 
-Instead of forcing you to design models directly in a complicated constrained space, you write
-your model in terms of meaningful parameters, and the transformation then takes care of the math
-that keeps everything inside the valid domain :cite:`tfpBijectorSoftplus2023,rezendeVariationalFlows2015`.
+- **Layer/module replacement** (e.g. replacing ``nn.Linear`` with Bayesian or evidential heads),
+- **Layer append/prepend** (e.g. adding ``nn.Softplus`` for evidential classification),
+- **Model generators/wrappers** (e.g. creating ensembles from a base model).
 
-In practice this means that transformations:
-
-- Provide a *short, reusable recipe* for how to turn raw latent variables into valid parameters,
-- Enable **reparameterisation**, which can make optimisation easier and gradients better behaved :cite:`kingmaAutoEncodingVB2014`,
-- Automatically enforce **constraints** such as positivity, bounds, or simplex structure :cite:`tfpBijectorSoftplus2023`.
-
-You can think of a transformation as an adapter between “nice for the optimiser” coordinates and
-“nice for the human” coordinates :cite:`kingmaAutoEncodingVB2014,rezendeVariationalFlows2015`. Clear
-parameterisations also make it easier to reason about how epistemic and aleatoric uncertainty are
-represented in the model :cite:`Hullermeier2021`.
+The underlying math is related to constrained parameterizations used in probabilistic modeling, but
+``probly`` currently exposes these rewrite/wrapper patterns rather than a generic bijector base
+class.
 
 The diagram below :cite:`Hullermeier2021` contrasts approximation uncertainty inside a hypothesis
 space with model uncertainty relative to the broader function space. It is a handy reminder that
@@ -96,381 +87,172 @@ transformations often sit between what a model can express and what the optimise
 2.2 When to implement your own?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The built-in transformations in ``probly`` are designed to cover many common cases,
-such as positive scales, simple box constraints, or mappings to probability vectors.
-This is similar in spirit to other probabilistic frameworks that provide default
-constraint transforms for bounded, ordered, simplex, correlation, or covariance
-parameters :cite:`stanConstraintTransforms2025`. In many projects these standard building
-blocks are sufficient and you never need to write your own transformation.
+The built-ins cover common workflows. Implement your own when:
 
-There are, however, important situations where a **custom transformation** is the
-better choice.
-
-- **Limitations of built-in transformations**
-
-  Some models use parameter spaces that go beyond the usual catalogue of common constraints such as positive,
-  bounded, or simplex parameters. For example, you may need structured covariance matrices,
-  ordered-but-positive sequences, monotone functions, or parameters that satisfy
-  several coupled constraints at once. The Stan reference manual notes that
-  “vectors may … be constrained to be ordered, positive ordered, or simplexes”
-  and matrices “to be correlation matrices or covariance matrices” in its section on
-  constraint transforms :cite:`stanConstraintTransforms2025`, but real applications
-  often demand more specialised structures. In such cases, a custom
-  transformation lets you explicitly encode the structure your model needs.
-
-- **Custom distributions or domain constraints**
-
-  In many domains, prior knowledge is naturally expressed as constraints on
-  parameters: certain probabilities must always sum to one, some effects must be
-  monotone, or fairness and safety requirements restrict which configurations are
-  admissible. A custom transformation is a convenient way to build such
-  domain-specific rules into the parameterisation instead of relying on
-  ad-hoc clipping or post-processing.
-
-- **Cleaner uncertainty behaviour and numerical stability**
-
-  Some parameterisations yield more interpretable and numerically stable
-  uncertainty estimates than others. A classic example is working on a log or
-  softplus scale for strictly positive parameters. Stan, for instance, uses a
-  logarithmic transform for lower-bounded variables and applies the inverse
-  exponential to map back to the constrained space :cite:`stanConstraintTransforms2025`.
-  Practitioners have observed that replacing a naïve exponential with a softplus
-  transform can substantially stabilise inference; one NumPyro user reports a
-  very substantial improvement in inference stability when replacing an ``exp``
-  transform with ``softplus`` for constraining ``site_scale`` :cite:`vitklSoftplusTransform2020`. In ``probly``, a custom transformation can encapsulate this kind of
-  numerically robust parameterisation and make its effect on uncertainty
-  representations easier to reason about.
-
-- **Integration with existing code or libraries**
-
-  When you plug ``probly`` into an existing machine-learning pipeline, external
-  code often expects parameters in a fixed, domain-specific representation. The
-  internal unconstrained parameterisation that is convenient for inference may
-  not match what a legacy training loop, a deep-learning framework, or a
-  production system “expects to see.” A transformation can act as a bridge:
-  ``probly`` operates in its preferred unconstrained space, while the surrounding
-  code continues to work with familiar application-level parameters, just as
-  constraint transforms reconcile internal and external parameterisations in Stan :cite:`stanConstraintTransforms2025`.
-
-As a practical rule of thumb: if you frequently add manual clamps, min/max
-operations, or ad-hoc post-processing steps just to keep parameters valid, that is
-a strong signal that a dedicated custom transformation would make the model
-cleaner, more robust, and easier to maintain.
+- You need support for a module type/backend that is not registered yet.
+- You need a different replacement policy (e.g. only last layer, skip first layer, selective blocks).
+- You need a custom output contract (e.g. positive-only heads, dict outputs, domain-specific postprocess).
+- You want a reusable transformation instead of repeated ad-hoc model surgery.
 
 2.3 API & Design Principles
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Custom transformations in ``probly`` should follow a **small and predictable interface**. Similar
-interfaces appear in other probabilistic libraries. For example, TensorFlow Probability notes
-that a ``Bijector`` is characterised by three operations (forward, inverse, and a log-determinant
-Jacobian) :cite:`tfpBijectorSoftplus2023`, and other libraries adopt essentially the same pattern.
+``probly`` currently has two main extension patterns.
 
-Conceptually, each transformation in ``probly`` is responsible for three things:
+**Pattern A: traverser-based rewrites**
 
-- A **forward mapping** from an unconstrained input to the constrained parameter space,
-  typically used to turn one random outcome into another :cite:`tfpBijectorSoftplus2023`,
-- An **inverse mapping** that recovers the unconstrained value from a constrained one,
-  enabling probability and density computations,
-- Any **auxiliary quantities** that inference algorithms may need, such as Jacobians or
-  log-determinants, to account for the change of variables.
+- Define a traverser with ``lazydispatch_traverser``.
+- Expose ``register(cls, traverser)`` for backend-specific handlers.
+- Apply it via ``traverse(..., nn_compose(...), init={..., CLONE: True})``.
 
-Stan’s transform system illustrates the same pattern: every (multivariate) parameter in a Stan
-model is transformed to an unconstrained variable behind the scenes by the model compiler,
-and the C++ classes include code to transform parameters from unconstrained to
-constrained and apply the appropriate Jacobians :cite:`stanConstraintTransforms2025`. In other
-words, the model is written in terms of constrained parameters, while inference operates in an
-unconstrained space connected by well-defined forward and inverse transforms.
+This pattern is used by transformations such as ``bayesian``, ``dropout``, ``dropconnect``,
+``batchensemble``, and ``evidential_regression``.
 
-Beyond this minimal interface, good transformations follow several design principles:
+**Pattern B: dispatcher-based wrappers/generators**
 
-- **Local and self-contained**
+- Define a ``lazydispatch`` function.
+- Register backend-specific handlers with ``register(cls, func)``.
+- Call the dispatcher from the public transformation entrypoint.
 
-  All logic that enforces a particular constraint should live inside the transformation. The rest
-  of the model should not need to know which reparameterisation is used internally. This mirrors
-  how libraries like Stan and NumPyro encapsulate constraints as self-contained objects that define
-  where parameters are valid :cite:`numpyroTransforms2019,stanConstraintTransforms2025`.
+This pattern is used by transformations such as ``evidential_classification`` and ``ensemble``.
 
-- **Clearly documented domain and range**
+**Design principles**
 
-  It should be obvious which inputs are valid, what shapes are expected, and which constraints the
-  outputs satisfy. NumPyro’s documentation describes constraint objects as representing regions over
-  which a variable is valid and can be optimised :cite:`numpyroTransforms2019`. Documenting domains and ranges for custom
-  transformations in ``probly`` serves the same purpose.
-
-- **Numerically stable**
-
-  The implementation should avoid unnecessary overflow, underflow, or extreme gradients. Stan’s
-  documentation on constraint transforms highlights numerical issues arising from floating-point
-  arithmetic and the need for careful treatment of boundaries and Jacobian terms :cite:`stanConstraintTransforms2025`. In practice, this often means using stable variants of mathematical formulas,
-  adding small epsilons, or applying safe clipping near boundaries.
-
-- **Composable**
-
-  Whenever possible, transformations should work well in combination with others. TensorFlow
-  Probability, for example, provides composition utilities such as ``Chain`` to build complex
-  mappings out of simpler bijectors :cite:`tfpModuleBijectorsND`. In ``probly``, the same
-  idea applies: designing transformations to be composable makes it easier to express rich
-  constraints while keeping each individual component small and testable.
-
-During **sampling and inference**, ``probly`` repeatedly calls the forward and inverse mappings of
-your transformation to move between the internal unconstrained representation and the external
-constrained parameters that appear in the model. A well-designed transformation therefore keeps
-these operations cheap, stable, and easy to reason about, in line with the goals of similar
-transform systems in Stan and TensorFlow Probability :cite:`stanConstraintTransforms2025,tfpBijectorSoftplus2023`.
+- Keep output types/shapes predictable and documented.
+- Validate hyperparameters early.
+- Keep rewrite logic local to the transformation.
+- Use stable constraint mappings inside layers (e.g. softplus for positive parameters).
 
 2.4 Step-by-step tutorial: simple custom transformation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-This section walks through a minimal example of implementing a custom transformation in ``probly``.
-The goal is not to show every detail of the library API, but to illustrate the typical workflow
-from an initial idea to a working component that can be used inside a model.
+Below is a minimal custom transformation pattern that matches the current codebase.
 
-**Problem description**
+**Goal**
 
-Suppose we want a parameter that must always be **strictly positive**, for example a scale or
-standard deviation. Many probabilistic frameworks enforce such constraints by transforming from an
-unconstrained real variable into a positive domain. For instance, the Stan reference manual notes
-that Stan uses a logarithmic transform for lower and upper bounds :cite:`stanLowerBoundedScalarND`,
-and TensorFlow Probability’s Softplus bijector is documented as having the positive real numbers
-as its domain :cite:`tfpBijectorSoftplus2023`. Following the same idea, we introduce an
-unconstrained real-valued variable and use a transformation to map it into the positive domain.
+Replace only the last ``nn.Linear`` with a positive-output head.
 
-Our transformation therefore needs to:
-
-- Take any real number as input,
-- Output a strictly positive value,
-- Be invertible (or at least approximately invertible) so that inference algorithms in ``probly``
-  can move between the two spaces.
-
-**Implementation**
-
-At implementation time we translate this idea into a small transformation object. Conceptually, it
-contains:
-
-- A **forward** method that maps from the unconstrained real line to positive values
-  (for example via an exponential or softplus mapping),
-- An **inverse** method that maps positive values back to the real line,
-- Any additional helpers required by the inference backends, such as computing a log-determinant
-  of the Jacobian if needed.
-
-Different libraries choose different specific transforms. Stan typically uses a log transform for
-strictly positive parameters :cite:`stanLowerBoundedScalarND`, while TensorFlow Probability provides a
-Softplus bijector which does not overflow as easily as the exponential bijector :cite:`tfpBijectorSoftplus2023`. NumPyro implements a similar idea with a dedicated
-Softplus-based transform from unconstrained space to the positive domain in its
-transforms module :cite:`numpyroTransforms2019`. In practice, this means you can choose
-between an exponential-style mapping (simple but potentially less stable) and a softplus-style
-mapping (slightly more complex but often more robust).
-
-The concrete class and method names in a custom transformation depend on the transformation base
-class used by ``probly``, but the conceptual structure is always the same: a forward map, an
-inverse map, and (when required) the corresponding Jacobian terms.
-
-A minimal, self-contained stub that follows this pattern (using NumPy for
-numerics) looks like:
+**1) Define a replacement layer**
 
 .. code-block:: python
 
-    import numpy as np
+    import torch
+    import torch.nn.functional as F
+    from torch import nn
 
-    class PositiveTransform:
-        """Maps R -> (0, inf) with stable forward/inverse."""
+    class PositiveHeadLinear(nn.Module):
+        def __init__(self, base_layer: nn.Linear) -> None:
+            super().__init__()
+            self.base_layer = base_layer
 
-        def forward(self, x):
-            return np.logaddexp(0.0, x)  # softplus
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return F.softplus(self.base_layer(x))
 
-        def inverse(self, y, eps=1e-8):
-            y = np.maximum(y, eps)
-            return np.log(np.exp(y) - 1.0 + eps)
+**2) Build traverser + registration**
 
-        def log_abs_det_jacobian(self, x):
-            return -np.logaddexp(0.0, -x)  # log(softplus'(x))
+.. code-block:: python
 
-    transform = PositiveTransform()
-    unconstrained = np.array([-1.0, 0.0, 1.0])
-    constrained = transform.forward(unconstrained)
+    from pytraverse import CLONE, TRAVERSE_REVERSED, GlobalVariable, lazydispatch_traverser, traverse
+    from probly.traverse_nn import nn_compose
 
-**Registration / configuration**
+    REPLACED_LAST_LINEAR = GlobalVariable[bool]("REPLACED_LAST_LINEAR", default=False)
+    positive_output_traverser = lazydispatch_traverser[object](name="positive_output_traverser")
 
-Once implemented, the transformation must be **registered** so that ``probly`` can find and use it.
-This usually means:
+    def register(cls, traverser) -> None:
+        positive_output_traverser.register(
+            cls=cls,
+            traverser=traverser,
+            skip_if=lambda s: s[REPLACED_LAST_LINEAR],
+        )
 
-- Making the class importable from the appropriate module,
-- Optionally adding it to a registry or configuration table,
-- Defining any configuration options (for example, whether to clamp values near the boundary, or
-  which nonlinearity to use).
+    def positive_output(base):
+        return traverse(
+            base,
+            nn_compose(positive_output_traverser),
+            init={TRAVERSE_REVERSED: True, CLONE: True},
+        )
 
-In other systems, something similar happens when new bijectors or constraint objects are added to
-the library’s registry and then reused across models :cite:`numpyroTransforms2019,tfpBijectorSoftplus2023`. In ``probly``, registration plays the same role: it turns a single
-implementation into a reusable building block.
+**3) Register backend behavior**
 
-After registration, the transformation can be referred to by name or imported wherever it is needed.
+.. code-block:: python
 
-**Using it in a model**
+    from torch import nn
 
-To use the transformation in a model, we introduce an unconstrained latent parameter and attach the
-transformation to it. During model construction, ``probly`` will then:
+    def replace_last_linear(obj: nn.Linear, state):
+        state[REPLACED_LAST_LINEAR] = True
+        return PositiveHeadLinear(obj), state
 
-- Store the transformation together with the parameter,
-- Transparently apply the forward mapping whenever the constrained parameter is needed,
-- Keep track of the relationship so that gradients and uncertainty estimates remain consistent.
+    register(nn.Linear, replace_last_linear)
 
-This mirrors the way Stan and other packages internally work with unconstrained parameters while
-presenting constrained parameters in the modelling language :cite:`stanLowerBoundedScalarND`. From the model author’s perspective, the parameter now behaves like a
-normal positive quantity, even though internally it is represented by an unconstrained variable.
+**4) Use it**
 
-**Running inference and inspecting results**
+.. code-block:: python
 
-When we run inference, optimisation, or sampling, ``probly`` operates in the unconstrained space but
-uses the transformation to interpret results in the constrained space. After the run finishes, we
-can:
-
-- Inspect posterior samples or point estimates of the constrained parameter,
-- Verify that all inferred values satisfy the desired constraints,
-- Compare behaviour with and without the custom transformation to understand its impact.
-
-Empirically, users have reported that carefully chosen positive transforms can significantly
-improve numerical behaviour. For example, one NumPyro user notes a very substantial improvement in
-inference stability when replacing an ``exp`` transformation with ``softplus`` for constraining
-``site_scale`` :cite:`vitklSoftplusTransform2020`. This simple workflow generalises to more complex transformations with
-multiple inputs, coupled constraints, or additional structure, and similar patterns appear across
-modern probabilistic programming frameworks.
+    transformed_model = positive_output(base_model)
 
 2.5 Advanced Patterns
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Once you are comfortable with basic custom transformations, ``probly`` allows for more advanced
-usage patterns that can make large or complex models easier to express. In the wider literature,
-normalizing flows show how powerful models can be obtained by composing simple invertible
-transformations :cite:`papamakariosNormalizingFlows2021,rezendeVariationalFlows2015`.
-
 **Composing multiple transformations**
 
-Often it is easier to build a complex mapping by **composing several simple transformations**
-rather than writing one large one. For example, you might:
+Transformations can be composed by applying one to the result of another:
 
-- First apply a shift-and-scale transform,
-- Then map the result onto a simplex,
-- Finally enforce an ordering constraint.
+.. code-block:: python
 
-Normalizing-flow work explicitly argues that we can build complex transformations by composing
-multiple instances of simpler transformations :cite:`papamakariosNormalizingFlows2021`, while still
-preserving invertibility and differentiability. Deep-learning libraries such as TensorFlow
-Probability provide bijector APIs that implement this idea in practice, allowing chains of
-transforms to be treated as a single object :cite:`tfpModuleBijectorsND`.
+    model = dropout(base_model, p=0.2)
+    model = evidential_classification(model)
 
-Designing custom transformations in ``probly`` with this mindset keeps each piece simple and
-testable: each small transform has a clear responsibility, and the full behaviour emerges from
-their composition.
+Order matters, because rewrites/wrappers modify the final module tree and outputs.
 
 **Sharing parameters across transformations**
 
-In some models, several transformations depend on a **shared parameter** or hyperparameter (for
-example a common scale or concentration parameter). Instead of duplicating this value, it is often
-better to:
-
-- Define the shared quantity once,
-- Pass references to it into multiple transformations,
-- Ensure that updates to the shared parameter are consistently reflected in all dependent
-  transformations.
-
-This pattern is closely related to hierarchical Bayesian modelling, where group-specific
-parameters are tied together through common hyperparameters. In that context, hierarchical models
-allow for the pooling of information across groups while accounting for group-specific
-variations :cite:`gelmanHillDataAnalysis2007`. Using shared parameters across transformations in ``probly``
-has a similar effect: information is shared in a controlled way, and the structure of the model
-remains explicit and interpretable.
+When several rewrites need shared settings, pass them through traversal state with
+``GlobalVariable`` values (as done by built-in transformations).
 
 **Handling randomness vs determinism inside transformations**
 
-Most transformations are deterministic mappings, but in some cases it is useful to include
-controlled **randomness** inside a transformation (for example randomised rounding or stochastic
-discretisation). When you design such components, it helps to follow the discipline used by
-modern functional ML frameworks.
-
-For example, the JAX documentation emphasises that JAX avoids implicit global random state and
-instead tracks state explicitly via a random key, and stresses that you should never use the same
-key twice :cite:`jaxPseudorandomNumbers2024`. Even if ``probly`` uses a different backend, the same
-principles are useful:
-
-- Deterministic behaviour is usually easier for optimisation and debugging,
-- If randomness is used, it should be driven by the same seeding and PRNG mechanisms as the rest
-  of the model,
-- The statistical meaning of the model should remain clear even when transformations are
-  stochastic.
-
-In practice, this means treating any random choices inside a transformation as part of the
-probabilistic model, not as hidden side effects.
+For stochastic layers (e.g. Bayesian/DropConnect), keep behavior consistent with backend
+``train()``/``eval()`` semantics and your seed policy.
 
 2.6 Testing & Debugging
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Well-tested transformations are crucial for trustworthy models. Because transformations sit
 between the internal representation and the visible parameters, subtle bugs can be hard to
-detect unless you test them explicitly. Large probabilistic frameworks such as Stan rely on
-extensive unit tests for accuracy of values and derivatives as well as error checking :cite:`carpenterStanProbabilistic2017`, which is a good benchmark for how seriously this layer should
-be treated.
+detect unless you test them explicitly.
 
-**Round-trip tests (forward + inverse)**
+**Structural tests**
 
-A basic but powerful test is the **round-trip check**:
-
-- Sample or construct a range of valid unconstrained inputs,
-- Apply the forward mapping followed by the inverse mapping,
-- Verify that the original inputs are recovered (up to numerical tolerance).
-
-From a mathematical point of view, this is just checking the fundamental property of a
-bijective transform: bijective functions are invertible and satisfy :math:`f^{-1}(f(x)) = x`.
-Round-trip tests are designed to catch cases where implementation details or shape handling
-break this property.
-
-Similarly, you can test constrained values by applying inverse then forward. Systematic
-deviations in either direction usually indicate mistakes in the formulas, inconsistencies in
-broadcasting, or shape mismatches between forward and inverse.
-
-For the ``PositiveTransform`` stub above, a minimal round-trip test is:
+For rewrite-based transformations, verify the module tree:
 
 .. code-block:: python
 
-    import numpy as np
+    # Example checks:
+    # - expected layer type was replaced
+    # - replacement happened exactly once (if intended)
+    # - skip rules (first/last layer) were respected
 
-    xs = np.linspace(-5, 5, 7)
-    ys = transform.forward(xs)
-    xs_back = transform.inverse(ys)
-    np.testing.assert_allclose(xs_back, xs, rtol=1e-5, atol=1e-6)
+**Output and stability checks**
 
-**Numerical stability checks**
+Validate that transformed models satisfy their output contract:
 
-Transformations that operate near boundaries (very small or very large values, probabilities
-near 0 or 1, etc.) can suffer from numerical problems. It is good practice to:
+- Expected type/shape/keys,
+- Expected range constraints (e.g. positivity),
+- No ``nan``/``inf`` on normal and edge-case inputs.
 
-- Test extreme but valid inputs,
-- Check for overflow, underflow, or ``nan``/``inf`` values,
-- Monitor gradients if the transformation is used in gradient-based inference.
-
-Experience in differentiable simulation libraries shows why this matters: NaNs tend to
-spread uncontrollably, making it difficult to trace their origin, so many projects adopt a
-strict no-NaN policy for both outputs and gradients. The same mindset works well in
-``probly``: treat any appearance of NaNs or infinities as a bug in either the transformation
-or its inputs, and add targeted tests to reproduce and eliminate it.
-
-Where necessary, introduce small epsilons, safe clipping, or alternative parameterisations
-to keep the transformation stable. For instance, many implementations replace naïve formulas
-by numerically stable variants or custom Jacobians when differentiability and stability
-conflict, as discussed in the algorithmic differentiation literature :cite:`griewankWaltherEvaluatingDerivatives2008`.
+Also test ``train()`` vs ``eval()`` behavior for stochastic transformations.
 
 **Common pitfalls and how to recognise them**
 
 Typical issues with custom transformations include:
 
-- Silently producing invalid outputs (for example negative values where only positives are allowed),
-- Mismatched shapes between forward and inverse mappings,
-- Forgetting to update the transformation when the model structure changes,
-- Inconsistent handling of broadcasting or batching.
+- Silently changing output type/shape and breaking downstream code,
+- Replacing too many or too few layers due to traversal rules,
+- Missing backend registration (leading to ``NotImplementedError``),
+- Numerical instability in custom constrained heads.
 
-Basic unit-testing advice for probabilistic code still applies here: at least assert that
-returned values are not null and lie in the expected range, and then add stronger
-distributional checks where appropriate. For transformations, that means checking *both* the
-unconstrained and constrained spaces for sanity (ranges, monotonicity, simple invariants).
+Basic unit-testing advice still applies: assert non-null outputs, valid ranges, stable numerics, and
+expected shapes/types before adding deeper distributional checks.
 
 Symptoms of problems with transformations often show up later as:
 
@@ -478,16 +260,8 @@ Symptoms of problems with transformations often show up later as:
 - Extremely large or unstable uncertainty estimates,
 - Runtime errors or NaNs deep inside the inference code.
 
-Empirical work on probabilistic programming systems suggests that many real bugs are linked
-to boundary conditions, dimension handling, and numerical issues. Tools that systematically
-stress-test these systems have uncovered previously unknown bugs across several frameworks,
-underlining that small mistakes in transform logic can have large downstream effects.
-
-When such issues appear in a ``probly`` model, it is often helpful to temporarily isolate
-the transformation in a small test script, run the round-trip and stability checks described
-above, and only then reintegrate it into the full model. This mirrors the way mature
-probabilistic frameworks separate low-level tests of math functions and transforms from
-high-level tests of full models :cite:`carpenterStanProbabilistic2017`.
+When such issues appear in a ``probly`` model, isolate the transformation in a small script,
+validate structure + outputs first, and then reintegrate into full training.
 
 3. Working with Large Models
 ----------------------------
@@ -759,7 +533,7 @@ not from exotic algorithms :cite:`zinkevichRulesMLND,tyagiScalingDeepLearning202
 
 - Has the same model been run on a smaller dataset as a sanity check? :cite:`zinkevichRulesMLND`
 - Are custom pieces (e.g. transformations) covered by at least basic tests
-  (shapes, ranges, round-trip checks)?
+  (shapes, ranges, output contracts, stability checks)?
 - Is configuration (batch size, learning rate, etc.) separated from the code so
   you can easily rerun experiments with different settings?
 
@@ -797,8 +571,9 @@ results are telling you :cite:`tuOverviewLargeAI2024,tyagiScalingDeepLearning202
 .. note::
 
    ``probly`` already ships maintained helpers for **PyTorch** and **Flax/JAX**. There is **no**
-   TensorFlow backend and **no** scikit-learn estimator wrapper in the codebase. TensorFlow and
-   scikit-learn are mentioned below only to show how you might connect your own code to ``probly``.
+   TensorFlow backend and **no full** scikit-learn estimator-style adapter in the codebase.
+   ``probly`` does include partial scikit-learn support (for example, ensemble transformation and
+   sampling helpers), and the section below explains how to connect your own workflow.
 
 This chapter assumes that you sometimes want to use ``probly`` together with other
 tools: neural-network libraries, data pipelines, or classic ML components.
@@ -871,8 +646,9 @@ Performance tips mirror ``tf.data`` guidance: overlap input loading with model e
 4.4 Using ``probly`` with scikit-learn
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There is no scikit-learn adapter in the library. ``scikit-learn`` is only used for metrics in
-``src/probly/evaluation/tasks.py``. To integrate with the estimator API, write a small wrapper:
+There is no full scikit-learn estimator-style adapter in the library. ``probly`` does include
+scikit-learn support for some features (for example ensemble transformation and sampling helpers),
+but to use the full estimator API in your own workflow, write a small wrapper:
 
 - Store config in ``__init__`` (model structure, priors, inference method).
 - Implement ``fit(X, y=None)`` to run ``probly`` training/inference.
@@ -1177,9 +953,9 @@ most important ideas to remember:
   iterating in a controlled way.
 
 - **Use transformations to tame tricky parameter spaces.**
-  Transformations let you express models in natural, human-friendly parameters while keeping
-  inference in a convenient unconstrained space. Custom transforms are the place to encode
-  constraints, reparameterisations, and numerical tricks so the rest of the model stays clean.
+  In ``probly``, transformations are reusable model rewrites/wrappers. Use them to encode
+  constraints, reparameterisations, and numerical tricks at the transformation/layer level so the
+  rest of the model stays clean.
 
 - **Structure your code for large models and datasets.**
   As things grow, clear modular structure matters as much as the math: separate data loading,
@@ -1198,8 +974,9 @@ most important ideas to remember:
 
 - **Test, profile, and document advanced pieces.**
   Custom transformations, large-model setups, and multi-framework integrations deserve small
-  dedicated tests and occasional profiling runs. A few well-placed checks (round-trip tests,
-  shape checks, smoke tests) catch many subtle bugs before they become expensive.
+  dedicated tests and occasional profiling runs. A few well-placed checks (structure checks,
+  output-contract checks, shape checks, smoke tests) catch many subtle bugs before they become
+  expensive.
 
 - **Favour clarity and robustness over cleverness.**
   An “advanced” model is only useful if people can understand, trust, and maintain it. Simple,

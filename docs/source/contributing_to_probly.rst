@@ -91,7 +91,7 @@ Set up your development environment
 ------------------------------------
 After you forked the repository, you can now set up your development environment for contributing to ``probly``:
 
-1. Ensure you have Python 3.10 or higher installed on your machine.
+1. Ensure you have Python 3.12.3 or higher installed on your machine.
 
 2. `uv <https://docs.astral.sh/uv/>`_ :cite:`uv` can be used to manage the development environment.
 
