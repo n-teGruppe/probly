@@ -591,7 +591,7 @@ and over again:
 - How **types, shapes, and devices** are handled,
 - How **randomness and seeds** are managed.
 
-**Data flow between ``probly`` and other libraries**
+**Data flow between `probly` and other libraries**
 
 - PyTorch: pass/return ``torch.Tensor`` (supported directly in ``probly`` via built-in torch modules,
   e.g. ``probly.representation.sampling.torch_sample``).

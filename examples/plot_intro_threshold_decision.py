@@ -2,7 +2,7 @@
 ================================
 
 A minimal thresholding “predictor” that turns continuous inputs into class labels,
-plus a plot showing how the decision changes with the threshold.
+plus a plot showing how the decision changes as the threshold moves.
 """
 
 from __future__ import annotations
@@ -17,16 +17,21 @@ def threshold_predict(x: np.ndarray, threshold: float) -> np.ndarray:
 
 
 x = np.linspace(-1.0, 2.0, 9)
-threshold = 0.3
-preds = threshold_predict(x, threshold)
+thresholds = np.array([-0.2, 0.3, 0.8])
 
-plt.figure(figsize=(4, 2.5))
-plt.plot(x, np.zeros_like(x), "o", label="input")
+plt.figure(figsize=(5.2, 2.8))
+plt.plot(x, np.zeros_like(x), "o", color="#555555", label="input")
 plt.hlines(0, x.min() - 0.1, x.max() + 0.1, colors="#cccccc", linestyles="--")
-plt.scatter(x, preds, color="#d56c6c", marker="s", label="predicted class")
-plt.axvline(threshold, color="#6c8cd5", linestyle="--", label="threshold")
+
+for i, threshold in enumerate(thresholds):
+    preds = threshold_predict(x, float(threshold))
+    y_offset = preds + i * 0.12
+    plt.scatter(x, y_offset, marker="s", s=28, label=f"class @ t={threshold:.1f}")
+    plt.axvline(threshold, linestyle="--", linewidth=1, alpha=0.7)
+
 plt.xlabel("Input")
 plt.yticks([0, 1], ["class 0", "class 1"])
-plt.title("Threshold decision rule")
-plt.legend(loc="upper left", frameon=False)
+plt.ylim(-0.15, 1.35)
+plt.title("Threshold decision rule (moving threshold)")
+plt.legend(loc="upper left", frameon=False, fontsize=8)
 plt.tight_layout()

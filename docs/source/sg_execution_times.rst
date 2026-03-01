@@ -6,7 +6,7 @@
 
 Computation times
 =================
-**00:00.419** total execution time for 9 files **from all galleries**:
+**00:00.481** total execution time for 9 files **from all galleries**:
 
 .. container::
 
@@ -33,28 +33,28 @@ Computation times
      - Time
      - Mem (MB)
    * - :ref:`sphx_glr_auto_examples_plot_gallery_smoke_test.py` (``../../examples/plot_gallery_smoke_test.py``)
-     - 00:00.111
+     - 00:00.126
      - 0.0
    * - :ref:`sphx_glr_auto_examples_plot_epistemic_vs_aleatoric.py` (``../../examples/plot_epistemic_vs_aleatoric.py``)
-     - 00:00.065
+     - 00:00.077
      - 0.0
    * - :ref:`sphx_glr_auto_examples_plot_selective_prediction.py` (``../../examples/plot_selective_prediction.py``)
-     - 00:00.059
+     - 00:00.068
      - 0.0
    * - :ref:`sphx_glr_auto_examples_plot_uncertainty_quantification.py` (``../../examples/plot_uncertainty_quantification.py``)
+     - 00:00.055
+     - 0.0
+   * - :ref:`sphx_glr_auto_examples_plot_intro_threshold_decision.py` (``../../examples/plot_intro_threshold_decision.py``)
      - 00:00.043
      - 0.0
    * - :ref:`sphx_glr_auto_examples_plot_samples_with_array_sample.py` (``../../examples/plot_samples_with_array_sample.py``)
      - 00:00.030
      - 0.0
-   * - :ref:`sphx_glr_auto_examples_plot_using_predict_protocol.py` (``../../examples/plot_using_predict_protocol.py``)
-     - 00:00.029
-     - 0.0
-   * - :ref:`sphx_glr_auto_examples_plot_intro_threshold_decision.py` (``../../examples/plot_intro_threshold_decision.py``)
+   * - :ref:`sphx_glr_auto_examples_plot_intro_uncertainty_glimpse.py` (``../../examples/plot_intro_uncertainty_glimpse.py``)
      - 00:00.028
      - 0.0
-   * - :ref:`sphx_glr_auto_examples_plot_intro_uncertainty_glimpse.py` (``../../examples/plot_intro_uncertainty_glimpse.py``)
-     - 00:00.027
+   * - :ref:`sphx_glr_auto_examples_plot_using_predict_protocol.py` (``../../examples/plot_using_predict_protocol.py``)
+     - 00:00.028
      - 0.0
    * - :ref:`sphx_glr_auto_examples_plot_create_sample_dispatch.py` (``../../examples/plot_create_sample_dispatch.py``)
      - 00:00.027
